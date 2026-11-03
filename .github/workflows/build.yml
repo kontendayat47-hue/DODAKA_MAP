@@ -18,8 +18,16 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Ekstrak proyek dari app.zip
-        run: unzip -q app.zip -d proj
+      - name: Ekstrak proyek dari app-baru.zip
+        run: unzip -q app-baru.zip -d proj
+      - name: Pasang konfigurasi Firebase
+        run: |
+          if [ -f firebase-config.js ]; then
+            cp firebase-config.js proj/www/firebase-config.js
+            echo "Memakai firebase-config.js dari root repo"
+          else
+            echo "Memakai firebase-config.js bawaan app-baru.zip"
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -35,30 +43,17 @@ jobs:
         run: |
           mkdir -p www/vendor/leaflet
           cp -r node_modules/leaflet/dist/* www/vendor/leaflet/
-      - name: Service worker anti-basi (network-first)
+      - name: Unduh Firebase SDK
         working-directory: proj
         run: |
-          cat > www/service-worker.js <<SW
-          const CACHE_NAME = "dodaka-map-build-${{ github.run_number }}";
-          self.addEventListener("install", e => { self.skipWaiting(); });
-          self.addEventListener("activate", e => e.waitUntil(
-            caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
-              .then(() => self.clients.claim())
-          ));
-          self.addEventListener("fetch", e => {
-            if (e.request.method !== "GET") return;
-            e.respondWith(
-              fetch(e.request).then(res => {
-                if (new URL(e.request.url).origin === self.location.origin) {
-                  const copy = res.clone();
-                  caches.open(CACHE_NAME).then(c => c.put(e.request, copy));
-                }
-                return res;
-              }).catch(() => caches.match(e.request).then(r => r || caches.match("./index.html")))
-            );
-          });
-          SW
-          sed -i 's/^          //' www/service-worker.js
+          mkdir -p www/vendor/firebase
+          for f in app auth firestore; do
+            curl -fsSL "https://www.gstatic.com/firebasejs/10.14.1/firebase-$f-compat.js" -o "www/vendor/firebase/firebase-$f-compat.js"
+          done
+          ls -la www/vendor/firebase
+      - name: Beri nomor versi pada service worker
+        working-directory: proj
+        run: sed -i "s/dodaka-map-dev/dodaka-map-build-${{ github.run_number }}/" www/service-worker.js
       - name: Arahkan APK ke alamat GitHub Pages
         working-directory: proj
         run: |
